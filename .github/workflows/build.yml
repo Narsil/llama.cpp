@@ -78,7 +78,7 @@ jobs:
             llama-${{ steps.tag.outputs.name }}-bin-macos-arm64.zip
 
   macOS-latest-cmake-x64:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
       - name: Clone
