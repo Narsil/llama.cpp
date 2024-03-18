@@ -21,11 +21,8 @@ env:
   GGML_N_THREADS: 1
 
 jobs:
-  # TODO: build with LLAMA_NO_METAL because test-backend-ops fail on "Apple Paravirtual device" and I don't know
-  #       how to debug it.
-  #       ref: https://github.com/ggerganov/llama.cpp/actions/runs/7131777249/job/19420981052#step:5:1124
-  macOS-latest-make:
-    runs-on: macos-latest
+  macOS-latest-cmake-arm64:
+    runs-on: macos-14
 
     steps:
       - name: Clone
@@ -39,24 +36,48 @@ jobs:
           brew update
 
       - name: Build
-        id: make_build
-        env:
-            LLAMA_FATAL_WARNINGS: 1
+        id: cmake_build
         run: |
-          LLAMA_METAL_EMBED_LIBRARY=1 make -j $(sysctl -n hw.logicalcpu)
+          sysctl -a
+          mkdir build
+          cd build
+          cmake -DLLAMA_FATAL_WARNINGS=ON -DLLAMA_METAL_EMBED_LIBRARY=ON ..
+          cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
 
       - name: Test
-        id: make_test
+        id: cmake_test
         run: |
-          LLAMA_METAL_EMBED_LIBRARY=1 make tests -j $(sysctl -n hw.logicalcpu)
-          LLAMA_METAL_EMBED_LIBRARY=1 make test  -j $(sysctl -n hw.logicalcpu)
+          cd build
+          ctest -L main --verbose --timeout 900
 
+      - name: Determine tag name
+        id: tag
+        shell: bash
+        run: |
+          BUILD_NUMBER="$(git rev-list --count HEAD)"
+          SHORT_HASH="$(git rev-parse --short=7 HEAD)"
+          if [[ "${{ env.BRANCH_NAME }}" == "master" ]]; then
+            echo "name=b${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+          else
+            SAFE_NAME=$(echo "${{ env.BRANCH_NAME }}" | tr '/' '-')
+            echo "name=${SAFE_NAME}-b${BUILD_NUMBER}-${SHORT_HASH}" >> $GITHUB_OUTPUT
+          fi
 
-  # TODO: build with LLAMA_METAL=OFF because test-backend-ops fail on "Apple Paravirtual device" and I don't know
-  #       how to debug it.
-  #       ref: https://github.com/ggerganov/llama.cpp/actions/runs/7132125951/job/19422043567?pr=4359#step:5:6584
-  #       would be great if we fix these
-  macOS-latest-cmake:
+      - name: Pack artifacts
+        id: pack_artifacts
+          # if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        run: |
+          cp LICENSE ./build/bin/
+          zip -r llama-${{ steps.tag.outputs.name }}-bin-macos-arm64.zip ./build/bin/*
+
+      - name: Upload artifacts
+        # if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+        uses: actions/upload-artifact@v3
+        with:
+          path: |
+            llama-${{ steps.tag.outputs.name }}-bin-macos-arm64.zip
+
+  macOS-latest-cmake-x64:
     runs-on: macos-14
 
     steps:
@@ -112,137 +133,13 @@ jobs:
           path: |
             llama-${{ steps.tag.outputs.name }}-bin-macos-x64.zip
 
-  macOS-latest-cmake-ios:
-    runs-on: macos-latest
-
-    steps:
-      - name: Clone
-        id: checkout
-        uses: actions/checkout@v1
-
-      - name: Dependencies
-        id: depends
-        continue-on-error: true
-        run: |
-          brew update
-
-      - name: Build
-        id: cmake_build
-        run: |
-          sysctl -a
-          mkdir build
-          cd build
-          cmake -G Xcode .. \
-            -DLLAMA_METAL_EMBED_LIBRARY=ON \
-            -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_SERVER=OFF \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
-          cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
-
-  macOS-latest-cmake-tvos:
-    runs-on: macos-latest
-
-    steps:
-      - name: Clone
-        id: checkout
-        uses: actions/checkout@v1
-
-      - name: Dependencies
-        id: depends
-        continue-on-error: true
-        run: |
-          brew update
-
-      - name: Build
-        id: cmake_build
-        run: |
-          sysctl -a
-          mkdir build
-          cd build
-          cmake -G Xcode .. \
-            -DLLAMA_METAL_EMBED_LIBRARY=ON \
-            -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_SERVER=OFF \
-            -DCMAKE_SYSTEM_NAME=tvOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
-          cmake --build . --config Release -j $(sysctl -n hw.logicalcpu)
-
-          # macOS-latest-swift:
-          #   runs-on: macos-latest
-
-          #   strategy:
-          #     matrix:
-          #       destination: ['generic/platform=macOS', 'generic/platform=iOS', 'generic/platform=tvOS']
-
-          #   steps:
-          #     - name: Clone
-          #       id: checkout
-          #       uses: actions/checkout@v1
-
-          #     - name: Dependencies
-          #       id: depends
-          #       continue-on-error: true
-          #       run: |
-          #         brew update
-
-          #     - name: xcodebuild for swift package
-          #       id: xcodebuild
-          #       run: |
-          #         xcodebuild -scheme llama -destination "${{ matrix.destination }}"
-
-          #     - name: Build Swift Example
-          #       id: make_build_swift_example
-          #       run: |
-          #           make swift
-
-
-          #     - name: Determine tag name
-          #       id: tag
-          #       shell: bash
-          #       run: |
-          #         BUILD_NUMBER="$(git rev-list --count HEAD)"
-          #         SHORT_HASH="$(git rev-parse --short=7 HEAD)"
-          #         if [[ "${{ env.BRANCH_NAME }}" == "master" ]]; then
-          #           echo "name=b${BUILD_NUMBER}" >> $GITHUB_OUTPUT
-          #         else
-          #           SAFE_NAME=$(echo "${{ env.BRANCH_NAME }}" | tr '/' '-')
-          #           echo "name=${SAFE_NAME}-b${BUILD_NUMBER}-${SHORT_HASH}" >> $GITHUB_OUTPUT
-          #         fi
-
-          #     - name: Pack artifacts
-          #       id: pack_artifacts
-          #       if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
-          #       run: |
-          #         Copy-Item LICENSE .\build\bin\Release\llama.cpp.txt
-          #         7z a llama-${{ steps.tag.outputs.name }}-bin-win-${{ matrix.build }}-x64.zip .\build\bin\Release\*
-
-          #     - name: Upload artifacts
-          #       if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
-          #       uses: actions/upload-artifact@v3
-          #       with:
-          #         path: |
-          #           llama-${{ steps.tag.outputs.name }}-bin-win-${{ matrix.build }}-x64.zip
-
-          # ios-xcode-build:
-          #   runs-on: macos-latest
-
-          #   steps:
-          #     - name: Checkout code
-          #       uses: actions/checkout@v3
-
-          #     - name: Build Xcode project
-          #       run: xcodebuild -project examples/llama.swiftui/llama.swiftui.xcodeproj -scheme llama.swiftui -sdk iphoneos CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= -destination 'generic/platform=iOS' build
-
   release:
       # if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
 
     runs-on: ubuntu-latest
 
     needs:
-      - macOS-latest-make
+      - macOS-latest-cmake
 
     steps:
       - name: Clone
