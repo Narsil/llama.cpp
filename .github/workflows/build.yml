@@ -57,7 +57,7 @@ jobs:
   #       ref: https://github.com/ggerganov/llama.cpp/actions/runs/7132125951/job/19422043567?pr=4359#step:5:6584
   #       would be great if we fix these
   macOS-latest-cmake:
-    runs-on: macos-latest-large
+    runs-on: macos-14
 
     steps:
       - name: Clone
